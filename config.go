@@ -25,7 +25,10 @@ func init() {
 	viper.SetDefault("ProcessWarc", true)
 	viper.SetDefault("MaxDownloads", -1)
 
-	viper.SetDefault("MimeFilter", []string{"javascript", "css", "html", "svg"})
+	viper.SetDefault("DownloadWorkers", 3)
+	viper.SetDefault("ProcessWorkers", 6)
+
+	viper.SetDefault("MimeFilter", []string{})
 
 	viper.SetDefault("BaseUrl", "https://data.commoncrawl.org")
 	viper.SetDefault("UserAgent", "CommonCrawl CLI/1.0 (https://github.com/dbheise/commoncrawlcli)")

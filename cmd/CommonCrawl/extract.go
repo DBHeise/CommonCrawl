@@ -1,7 +1,6 @@
 package main
 
 //TODO:
-// parrallel processing of downloads and/or records
 // tld/domain/path filter
 // ip/iprange/cidr filter
 // allow for custom configuration of output saving folder
@@ -22,6 +21,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	warc "github.com/internetarchive/gowarc"
@@ -288,7 +288,86 @@ func FileExists(path string) (bool, error) {
 	return false, err
 }
 
-func ProcessLocalWarc(local string, output_folder string) error {
+type processJob struct {
+	record        *warc.Record
+	output_folder string
+}
+
+func process_worker(id int, work <-chan processJob, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for job := range work {
+		record := job.record
+		warcType := record.Header.Get("WARC-Type")
+		targetURL := record.Header.Get("WARC-Target-URI")
+		if warcType != "response" {
+			continue
+		}
+
+		log.Info().Int("P Worker", id).Str("url", targetURL).Msg("processing")
+
+		// Parse the embedded HTTP response.
+		resp, err := http.ReadResponse(
+			bufio.NewReader(record.Content),
+			nil,
+		)
+		if err != nil {
+			log.Error().Int("P Worker", id).Err(err).Msg("could not extract response")
+			continue
+		}
+
+		mime := strings.ToLower(resp.Header.Get("Content-Type"))
+
+		if ContainsAnySub(mime, viper.GetStringSlice("MimeFilter")) {
+
+			//Convert url to local path
+			local, err := URLToLocalPath_Robust(job.output_folder, targetURL, mime)
+			if err != nil {
+				log.Error().Int("P Worker", id).Err(err).Msg("could not extract local path")
+				continue
+			}
+			local_metadata := local + viper.GetString("MetadataExtension")
+
+			// ensure local path is ready
+			if err := os.MkdirAll(filepath.Dir(local), 0755); err != nil {
+				log.Error().Int("P Worker", id).Err(err).Msg("could not create local path")
+				continue
+			}
+
+			//TODO: handle local file already exists
+			//	have to read in metadata and merge??
+
+			// create local file
+			file, err := os.Create(local)
+			if err != nil {
+				log.Error().Int("P Worker", id).Err(err).Msg("could not create local file")
+				continue
+			}
+			defer file.Close()
+
+			//write body to local file
+			_, err = io.Copy(file, resp.Body)
+			if err != nil {
+				log.Error().Int("P Worker", id).Err(err).Msg("could not stream to disk")
+				continue
+			}
+
+			//write metadata to file
+			data, err := json.MarshalIndent(record.Header, "", "  ")
+			if err != nil {
+				log.Error().Int("P Worker", id).Err(err).Msg("could not marshal metadata")
+				continue
+			}
+			if err := os.WriteFile(local_metadata, data, 0644); err != nil {
+				log.Error().Int("P Worker", id).Err(err).Msg("could not write metadata to disk")
+				continue
+			}
+		}
+	}
+
+}
+
+func ProcessLocalWarc(local string, output_folder string, workQueue chan processJob) error {
 	f, err := os.Open(local)
 	if err != nil {
 		return err
@@ -308,67 +387,63 @@ func ProcessLocalWarc(local string, output_folder string) error {
 		if err != nil {
 			return err
 		}
-		warcType := record.Header.Get("WARC-Type")
-		targetURL := record.Header.Get("WARC-Target-URI")
-		if warcType != "response" {
-			continue
+
+		work := processJob{
+			record:        record,
+			output_folder: output_folder,
 		}
+		workQueue <- work
 
-		log.Info().Str("url", targetURL).Msg("processing")
+	}
+	return nil
+}
 
-		// Parse the embedded HTTP response.
-		resp, err := http.ReadResponse(
-			bufio.NewReader(record.Content),
-			nil,
-		)
+type downloaderJob struct {
+	url            string
+	output_folder  string
+	content_folder string
+	download       bool
+	process        bool
+}
+
+func download_worker(id int, jobs <-chan downloaderJob, work chan processJob, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for job := range jobs {
+
+		log.Info().Int("DLWorker", id).Str("url", job.url).Msg("Processing")
+
+		u, err := url.Parse(job.url)
 		if err != nil {
-			fmt.Printf("parse error: %v\n", err)
+			log.Error().Int("DLWorker", id).Err(err).Msg("could not parse url")
+			continue
+		}
+		filename := path.Base(u.Path)
+
+		local_file := filepath.Join(job.output_folder, filename)
+
+		exists, err := FileExists(local_file)
+		if err != nil {
+			log.Error().Int("DLWorker", id).Err(err).Msg("could not check if file exists")
 			continue
 		}
 
-		mime := strings.ToLower(resp.Header.Get("Content-Type"))
-
-		if ContainsAnySub(mime, viper.GetStringSlice("MimeFilter")) {
-
-			//Convert url to local path
-			local, err := URLToLocalPath_Robust(output_folder, targetURL, mime)
+		if !exists && job.download {
+			err = DownloadToFile(job.url, local_file)
 			if err != nil {
-				return err
+				log.Error().Int("DLWorker", id).Err(err).Msg("could not download WARC")
+				continue
 			}
-			local_metadata := local + viper.GetString("MetadataExtension")
+			exists = true
+		}
 
-			// ensure local path is ready
-			if err := os.MkdirAll(filepath.Dir(local), 0755); err != nil {
-				return err
-			}
-
-			//TODO: handle local file already exists
-			//	have to read in metadata and merge??
-
-			// create local file
-			file, err := os.Create(local)
+		if job.process && exists {
+			err = ProcessLocalWarc(local_file, job.content_folder, work)
 			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			//write body to local file
-			_, err = io.Copy(file, resp.Body)
-			if err != nil {
-				return err
-			}
-
-			//write metadata to file
-			data, err := json.MarshalIndent(record.Header, "", "  ")
-			if err != nil {
-				return err
-			}
-			if err := os.WriteFile(local_metadata, data, 0644); err != nil {
-				return err
+				log.Error().Int("DLWorker", id).Err(err).Msg("could not process WARC")
+				continue
 			}
 		}
 	}
-	return nil
 }
 
 func extract() {
@@ -401,6 +476,30 @@ func extract() {
 			lines[i], lines[j] = lines[j], lines[i]
 		})
 	}
+
+	numJobs := len(lines)
+	if max_downloads > 0 {
+		numJobs = max_downloads
+	}
+	var wgJobs sync.WaitGroup
+	var wgWork sync.WaitGroup
+
+	jobs := make(chan downloaderJob, numJobs)
+	workQ := make(chan processJob)
+
+	// Start Workers
+	numWorkers := viper.GetInt("DownloadWorkers")
+	for w := 1; w <= numWorkers; w++ {
+		wgJobs.Add(1)
+		go download_worker(w, jobs, workQ, &wgJobs)
+	}
+	numWorkers = viper.GetInt("ProcessWorkers")
+	for p := 1; p <= numWorkers; p++ {
+		wgWork.Add(1)
+		go process_worker(p, workQ, &wgWork)
+	}
+
+	// Enqueue Jobs
 	count := 0
 	for _, line := range lines {
 		count++
@@ -410,38 +509,25 @@ func extract() {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		dl_url := fmt.Sprintf("%s/%s", baseUrl, line)
-		log.Info().Str("url", dl_url).Msg("Processing")
-
-		u, err := url.Parse(dl_url)
-		if err != nil {
-			log.Fatal().Err(err).Msg("could not parse url")
+		dl := downloaderJob{
+			url:            fmt.Sprintf("%s/%s", baseUrl, line),
+			output_folder:  output_folder,
+			content_folder: data_output,
+			download:       downloadWarc,
+			process:        processWarc,
 		}
-		filename := path.Base(u.Path)
-
-		local_file := filepath.Join(output_folder, filename)
-
-		exists, err := FileExists(local_file)
-		if err != nil {
-			log.Fatal().Err(err).Msg("could not check if file exists")
-		}
-
-		if !exists && downloadWarc {
-			err = DownloadToFile(dl_url, local_file)
-			if err != nil {
-				log.Fatal().Err(err).Msg("could not download WARC")
-			}
-			exists = true
-		}
-
-		if processWarc && exists {
-			err = ProcessLocalWarc(local_file, data_output)
-			if err != nil {
-				log.Fatal().Err(err).Msg("could not process WARC")
-			}
-		}
+		jobs <- dl
 	}
 
+	// Close jobs channel
+	close(jobs)
+	// Wait for jobs to finish
+	wgJobs.Wait()
+
+	// Close the work channel
+	close(workQ)
+	// Wait for the work to finish
+	wgWork.Wait()
 }
 
 var extractCmd = &cobra.Command{
