@@ -1,4 +1,4 @@
-package webcache
+package CommonCrawl
 
 import (
 	"fmt"

@@ -6,11 +6,8 @@ package main
 // allow for custom configuration of output saving folder
 
 import (
+	"CommonCrawl"
 	"bufio"
-	"bytes"
-	"compress/gzip"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,275 +19,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	warc "github.com/internetarchive/gowarc"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
-
-func ContainsAnySub(str string, subs []string) bool {
-	for _, sub := range subs {
-		if strings.Contains(str, sub) {
-			return true // Short-circuit as soon as a match is found
-		}
-	}
-	return false
-}
-
-func URLToLocalPath_Robust(baseDir, rawURL, mime string) (string, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", err
-	}
-
-	// Hash the entire original URL.
-	sum := sha256.Sum256([]byte(rawURL))
-	hash := hex.EncodeToString(sum[:])
-
-	// Extract TLD.
-	tld := "unknown"
-
-	host := strings.ToLower(u.Hostname())
-	if parts := strings.Split(host, "."); len(parts) > 1 {
-		tld = parts[len(parts)-1]
-	}
-
-	//TODO: make this customizable
-	return filepath.Join(
-		baseDir,
-		sanitizeMime(mime),
-		tld,
-		hash[0:3],
-		hash[3:6],
-		hash[6:9],
-		hash,
-	), nil
-
-}
-
-func URLToLocalPath(baseDir, rawURL string) (string, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", err
-	}
-
-	host := sanitizeComponent(u.Hostname())
-	if host == "" {
-		return "", fmt.Errorf("url has no hostname")
-	}
-
-	// Decode URL path.
-	urlPath := u.Path
-
-	// Normalize.
-	urlPath = path.Clean("/" + urlPath)
-
-	// Split into path components.
-	var dirs []string
-
-	for _, part := range strings.Split(strings.Trim(urlPath, "/"), "/") {
-		if part == "" || part == "." || part == ".." {
-			continue
-		}
-
-		dirs = append(dirs, sanitizeComponent(part))
-	}
-
-	// Determine extension.
-	ext := filepath.Ext(urlPath)
-	if ext == "" {
-		ext = ".html"
-	}
-
-	// Use URL hash as filename.
-	sum := sha256.Sum256([]byte(rawURL))
-	hash := hex.EncodeToString(sum[:8])
-
-	filename := hash + ext
-
-	parts := []string{baseDir, host}
-	parts = append(parts, dirs...)
-
-	// Replace final path component with hashed filename.
-	if len(dirs) > 0 {
-		parts = parts[:len(parts)-1]
-	}
-
-	fullPath := filepath.Join(parts...)
-	fullPath = filepath.Join(fullPath, filename)
-
-	// Verify no escape from baseDir.
-	baseAbs, err := filepath.Abs(baseDir)
-	if err != nil {
-		return "", err
-	}
-
-	pathAbs, err := filepath.Abs(fullPath)
-	if err != nil {
-		return "", err
-	}
-
-	rel, err := filepath.Rel(baseAbs, pathAbs)
-	if err != nil {
-		return "", err
-	}
-
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path escapes base directory")
-	}
-
-	return pathAbs, nil
-}
-
-func sanitizeMime(mime string) string {
-	splitters := []rune{';', ','}
-	for _, s := range splitters {
-		if strings.ContainsRune(mime, s) {
-			mime = strings.Split(mime, string(s))[0]
-		}
-	}
-	return sanitizeComponent(mime)
-}
-
-func sanitizeComponent(s string) string {
-	s = strings.TrimSpace(s)
-
-	// Windows-invalid characters.
-	replacer := strings.NewReplacer(
-		"<", "_",
-		">", "_",
-		":", "_",
-		"\"", "_",
-		"/", "_",
-		"\\", "_",
-		"|", "_",
-		"?", "_",
-		"*", "_",
-	)
-
-	s = replacer.Replace(s)
-
-	// Remove control chars.
-	var b strings.Builder
-	for _, r := range s {
-		if r < 32 {
-			continue
-		}
-		b.WriteRune(r)
-	}
-
-	s = b.String()
-
-	// Windows doesn't like trailing dots/spaces.
-	s = strings.TrimRight(s, ". ")
-
-	if s == "" {
-		s = "_"
-	}
-
-	return s
-}
-
-func DownloadPage(url string) ([]byte, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("User-Agent", viper.GetString("UserAgent"))
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("request failed with status %s", resp.Status)
-	}
-
-	content, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	return content, nil
-}
-
-func DownloadToFile(url, path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("User-Agent", viper.GetString("UserAgent"))
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status: %s", resp.Status)
-	}
-
-	file, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	_, err = io.Copy(file, resp.Body)
-	if err != nil {
-		return err
-	}
-
-	return file.Sync()
-}
-
-func DecompressGZIP(data []byte) ([]byte, error) {
-	reader, err := gzip.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("open gzip data: %w", err)
-	}
-	defer reader.Close()
-
-	uncompressed, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, fmt.Errorf("decompress gzip data: %w", err)
-	}
-
-	return uncompressed, nil
-}
-
-func DownloadAndUnGZip(url string) ([]byte, error) {
-	compressed, err := DownloadPage(url)
-	if err != nil {
-		log.Error().Err(err).Msg("download failed")
-		return nil, err
-	}
-
-	decompressed, err := DecompressGZIP(compressed)
-	if err != nil {
-		log.Error().Err(err).Msg("decompression failed")
-		return nil, err
-	}
-
-	return decompressed, nil
-}
-
-func FileExists(path string) (bool, error) {
-	_, err := os.Stat(path)
-	if err == nil {
-		return true, nil
-	}
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return false, err
-}
 
 type processJob struct {
 	record        *warc.Record
@@ -322,10 +55,10 @@ func process_worker(id int, work <-chan processJob, wg *sync.WaitGroup) {
 
 		mime := strings.ToLower(resp.Header.Get("Content-Type"))
 
-		if ContainsAnySub(mime, viper.GetStringSlice("MimeFilter")) {
+		if CommonCrawl.ContainsAnySub(mime, viper.GetStringSlice("MimeFilter")) {
 
 			//Convert url to local path
-			local, err := URLToLocalPath_Robust(job.output_folder, targetURL, mime)
+			local, err := CommonCrawl.URLToLocalPath_Robust(job.output_folder, targetURL, mime)
 			if err != nil {
 				log.Error().Int("P Worker", id).Err(err).Msg("could not extract local path")
 				continue
@@ -338,7 +71,7 @@ func process_worker(id int, work <-chan processJob, wg *sync.WaitGroup) {
 				continue
 			}
 
-			exists, err := FileExists(local)
+			exists, err := CommonCrawl.FileExists(local)
 			if err != nil {
 				log.Error().Int("PWorker", id).Err(err).Msg("could not check if file exists")
 				continue
@@ -432,14 +165,14 @@ func download_worker(id int, jobs <-chan downloaderJob, work chan processJob, wg
 
 		local_file := filepath.Join(job.output_folder, filename)
 
-		exists, err := FileExists(local_file)
+		exists, err := CommonCrawl.FileExists(local_file)
 		if err != nil {
 			log.Error().Int("DLWorker", id).Err(err).Msg("could not check if file exists")
 			continue
 		}
 
 		if !exists && job.download {
-			err = DownloadToFile(job.url, local_file)
+			err = CommonCrawl.DownloadToFile(job.url, local_file)
 			if err != nil {
 				log.Error().Int("DLWorker", id).Err(err).Msg("could not download WARC")
 				continue
@@ -472,7 +205,7 @@ func extract() {
 
 	warc_url := fmt.Sprintf(viper.GetString("WarcPathFormat"), baseUrl, index)
 
-	decompressed, err := DownloadAndUnGZip(warc_url)
+	decompressed, err := CommonCrawl.DownloadAndUnGZip(warc_url)
 	if err != nil {
 		log.Fatal().Err(err).Msg("")
 	}

@@ -1,9 +1,8 @@
 package main
 
 import (
+	"CommonCrawl"
 	"os"
-
-	"webcache"
 
 	"github.com/spf13/cobra"
 )
@@ -32,6 +31,6 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-	webcache.InitializeConfig(cfgFile)
-	log = webcache.InitializeLogger("CommonCrawl")
+	CommonCrawl.InitializeConfig(cfgFile)
+	log = CommonCrawl.InitializeLogger("CommonCrawl")
 }

@@ -1,4 +1,4 @@
-package webcache
+package CommonCrawl
 
 import (
 	"os"
@@ -38,4 +38,3 @@ func InitializeLogger(name string) zerolog.Logger {
 
 	return log.With().Str("name", name).Logger()
 }
-
