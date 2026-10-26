@@ -56,6 +56,7 @@ func URLToLocalPath_Robust(baseDir, rawURL, mime string) (string, error) {
 		tld = parts[len(parts)-1]
 	}
 
+	//TODO: make this customizable
 	return filepath.Join(
 		baseDir,
 		sanitizeMime(mime),
@@ -143,8 +144,11 @@ func URLToLocalPath(baseDir, rawURL string) (string, error) {
 }
 
 func sanitizeMime(mime string) string {
-	if strings.ContainsRune(mime, ';') {
-		mime = strings.Split(mime, ";")[0]
+	splitters := []rune{';', ','}
+	for _, s := range splitters {
+		if strings.ContainsRune(mime, s) {
+			mime = strings.Split(mime, string(s))[0]
+		}
 	}
 	return sanitizeComponent(mime)
 }
@@ -334,33 +338,40 @@ func process_worker(id int, work <-chan processJob, wg *sync.WaitGroup) {
 				continue
 			}
 
-			//TODO: handle local file already exists
-			//	have to read in metadata and merge??
-
-			// create local file
-			file, err := os.Create(local)
+			exists, err := FileExists(local)
 			if err != nil {
-				log.Error().Int("P Worker", id).Err(err).Msg("could not create local file")
+				log.Error().Int("PWorker", id).Err(err).Msg("could not check if file exists")
 				continue
 			}
-			defer file.Close()
+			if !exists {
+				// create local file
+				file, err := os.Create(local)
+				if err != nil {
+					log.Error().Int("P Worker", id).Err(err).Msg("could not create local file")
+					continue
+				}
+				defer file.Close()
 
-			//write body to local file
-			_, err = io.Copy(file, resp.Body)
-			if err != nil {
-				log.Error().Int("P Worker", id).Err(err).Msg("could not stream to disk")
-				continue
-			}
+				//write body to local file
+				_, err = io.Copy(file, resp.Body)
+				if err != nil {
+					log.Error().Int("P Worker", id).Err(err).Msg("could not stream to disk")
+					continue
+				}
 
-			//write metadata to file
-			data, err := json.MarshalIndent(record.Header, "", "  ")
-			if err != nil {
-				log.Error().Int("P Worker", id).Err(err).Msg("could not marshal metadata")
-				continue
-			}
-			if err := os.WriteFile(local_metadata, data, 0644); err != nil {
-				log.Error().Int("P Worker", id).Err(err).Msg("could not write metadata to disk")
-				continue
+				//write metadata to file
+				data, err := json.MarshalIndent(record.Header, "", "  ")
+				if err != nil {
+					log.Error().Int("P Worker", id).Err(err).Msg("could not marshal metadata")
+					continue
+				}
+				if err := os.WriteFile(local_metadata, data, 0644); err != nil {
+					log.Error().Int("P Worker", id).Err(err).Msg("could not write metadata to disk")
+					continue
+				}
+			} else {
+				//TODO: do we want to merge the metadata or no?
+				log.Warn().Int("P Worker", id).Str("File", local).Msg("File already exists")
 			}
 		}
 	}
