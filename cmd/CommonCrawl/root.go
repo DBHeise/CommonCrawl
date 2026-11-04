@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var (
@@ -12,8 +13,8 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "webcache",
-	Short: "webcache Service",
+	Use:   "commoncrawl",
+	Short: "CommonCrawl Helper",
 }
 
 func Execute() {
@@ -26,7 +27,15 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/config.json)")
+	rootFlags := rootCmd.PersistentFlags()
+
+	rootFlags.String("index", "CC-MAIN-2026-43", "CommonCrawl Index to use")
+	_ = viper.BindPFlag("CCIndex", rootFlags.Lookup("index"))
+
+	rootFlags.String("data", ".\\data", "Local folder to store data")
+	_ = viper.BindPFlag("DataFolder", rootFlags.Lookup("data"))
+
+	rootFlags.StringVar(&cfgFile, "config", "", "config file (default is $HOME/config.json)")
 }
 
 // initConfig reads in config file and ENV variables if set.

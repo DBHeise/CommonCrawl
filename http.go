@@ -15,20 +15,39 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
 )
 
+type HTTPError struct {
+	StatusCode int
+	Status     string
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("http error: %s", e.Status)
+}
+
+func NewHTTPError(resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, viper.GetInt64("Http.ErrorBodyLimit")))
+
+	return &HTTPError{
+		StatusCode: resp.StatusCode,
+		Status:     resp.Status,
+		Body:       string(body),
+	}
+}
+
 func NewHttpClient() *http.Client {
 	return &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: time.Duration(viper.GetInt("Http.DefaultTimeoutSeconds")) * time.Second,
 	}
 }
 
 func NewHttpRequest(method, url string) (*http.Client, *http.Request) {
 	client := NewHttpClient()
 	req, _ := http.NewRequest(method, url, nil)
-	req.Header.Set("User-Agent", viper.GetString("UserAgent"))
+	req.Header.Set("User-Agent", viper.GetString("Http.UserAgent"))
 	return client, req
 }
 
@@ -137,8 +156,8 @@ func URLToLocalPath(baseDir, rawURL string) (string, error) {
 	return pathAbs, nil
 }
 
-func DownloadPage(url string) ([]byte, error) {
-	client, req := NewHttpRequest("GET", url)
+func DownloadPage(method, url string) ([]byte, error) {
+	client, req := NewHttpRequest(method, url)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -146,7 +165,7 @@ func DownloadPage(url string) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("request failed with status %s", resp.Status)
+		return nil, NewHTTPError(resp)
 	}
 
 	content, err := io.ReadAll(resp.Body)
@@ -157,12 +176,12 @@ func DownloadPage(url string) ([]byte, error) {
 	return content, nil
 }
 
-func DownloadToFile(url, path string) error {
+func DownloadToFile(method, url, path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 
-	client, req := NewHttpRequest("GET", url)
+	client, req := NewHttpRequest(method, url)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -171,7 +190,7 @@ func DownloadToFile(url, path string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status: %s", resp.Status)
+		return NewHTTPError(resp)
 	}
 
 	file, err := os.Create(path)
@@ -203,16 +222,14 @@ func DecompressGZIP(data []byte) ([]byte, error) {
 	return uncompressed, nil
 }
 
-func DownloadAndUnGZip(url string) ([]byte, error) {
-	compressed, err := DownloadPage(url)
+func DownloadAndUnGZip(method, url string) ([]byte, error) {
+	compressed, err := DownloadPage(method, url)
 	if err != nil {
-		log.Error().Err(err).Msg("download failed")
 		return nil, err
 	}
 
 	decompressed, err := DecompressGZIP(compressed)
 	if err != nil {
-		log.Error().Err(err).Msg("decompression failed")
 		return nil, err
 	}
 

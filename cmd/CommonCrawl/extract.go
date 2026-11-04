@@ -9,6 +9,7 @@ import (
 	"CommonCrawl"
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -18,7 +19,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	warc "github.com/internetarchive/gowarc"
 	"github.com/spf13/cobra"
@@ -30,82 +30,78 @@ type processJob struct {
 	output_folder string
 }
 
-func process_worker(id int, work <-chan processJob, wg *sync.WaitGroup) {
-	defer wg.Done()
+func process_worker(id int, job processJob, outQ chan string) {
+	record := job.record
+	warcType := record.Header.Get("WARC-Type")
+	targetURL := record.Header.Get("WARC-Target-URI")
+	if warcType != "response" {
+		return
+	}
 
-	for job := range work {
-		record := job.record
-		warcType := record.Header.Get("WARC-Type")
-		targetURL := record.Header.Get("WARC-Target-URI")
-		if warcType != "response" {
-			continue
-		}
+	log.Info().Int("P Worker", id).Str("url", targetURL).Msg("processing")
 
-		log.Info().Int("P Worker", id).Str("url", targetURL).Msg("processing")
+	// Parse the embedded HTTP response.
+	resp, err := http.ReadResponse(
+		bufio.NewReader(record.Content),
+		nil,
+	)
+	if err != nil {
+		log.Error().Int("P Worker", id).Err(err).Msg("could not extract response")
+		return
+	}
 
-		// Parse the embedded HTTP response.
-		resp, err := http.ReadResponse(
-			bufio.NewReader(record.Content),
-			nil,
-		)
+	mime := strings.ToLower(resp.Header.Get("Content-Type"))
+
+	if CommonCrawl.ContainsAnySub(mime, viper.GetStringSlice("Extract.MimeFilter")) {
+
+		//Convert url to local path
+		local, err := CommonCrawl.URLToLocalPath_Robust(job.output_folder, targetURL, mime)
 		if err != nil {
-			log.Error().Int("P Worker", id).Err(err).Msg("could not extract response")
-			continue
+			log.Error().Int("P Worker", id).Err(err).Msg("could not extract local path")
+			return
+		}
+		local_metadata := local + viper.GetString("MetadataExtension")
+
+		// ensure local path is ready
+		if err := os.MkdirAll(filepath.Dir(local), 0755); err != nil {
+			log.Error().Int("P Worker", id).Err(err).Msg("could not create local path")
+			return
 		}
 
-		mime := strings.ToLower(resp.Header.Get("Content-Type"))
-
-		if CommonCrawl.ContainsAnySub(mime, viper.GetStringSlice("MimeFilter")) {
-
-			//Convert url to local path
-			local, err := CommonCrawl.URLToLocalPath_Robust(job.output_folder, targetURL, mime)
+		exists, err := CommonCrawl.FileExists(local)
+		if err != nil {
+			log.Error().Int("PWorker", id).Err(err).Msg("could not check if file exists")
+			return
+		}
+		if !exists {
+			// create local file
+			file, err := os.Create(local)
 			if err != nil {
-				log.Error().Int("P Worker", id).Err(err).Msg("could not extract local path")
-				continue
+				log.Error().Int("P Worker", id).Err(err).Msg("could not create local file")
+				return
 			}
-			local_metadata := local + viper.GetString("MetadataExtension")
+			defer file.Close()
 
-			// ensure local path is ready
-			if err := os.MkdirAll(filepath.Dir(local), 0755); err != nil {
-				log.Error().Int("P Worker", id).Err(err).Msg("could not create local path")
-				continue
-			}
-
-			exists, err := CommonCrawl.FileExists(local)
+			//write body to local file
+			_, err = io.Copy(file, resp.Body)
 			if err != nil {
-				log.Error().Int("PWorker", id).Err(err).Msg("could not check if file exists")
-				continue
+				log.Error().Int("P Worker", id).Err(err).Msg("could not stream to disk")
+				return
 			}
-			if !exists {
-				// create local file
-				file, err := os.Create(local)
-				if err != nil {
-					log.Error().Int("P Worker", id).Err(err).Msg("could not create local file")
-					continue
-				}
-				defer file.Close()
 
-				//write body to local file
-				_, err = io.Copy(file, resp.Body)
-				if err != nil {
-					log.Error().Int("P Worker", id).Err(err).Msg("could not stream to disk")
-					continue
-				}
-
-				//write metadata to file
-				data, err := json.MarshalIndent(record.Header, "", "  ")
-				if err != nil {
-					log.Error().Int("P Worker", id).Err(err).Msg("could not marshal metadata")
-					continue
-				}
-				if err := os.WriteFile(local_metadata, data, 0644); err != nil {
-					log.Error().Int("P Worker", id).Err(err).Msg("could not write metadata to disk")
-					continue
-				}
-			} else {
-				//TODO: do we want to merge the metadata or no?
-				log.Warn().Int("P Worker", id).Str("File", local).Msg("File already exists")
+			//write metadata to file
+			data, err := json.MarshalIndent(record.Header, "", "  ")
+			if err != nil {
+				log.Error().Int("P Worker", id).Err(err).Msg("could not marshal metadata")
+				return
 			}
+			if err := os.WriteFile(local_metadata, data, 0644); err != nil {
+				log.Error().Int("P Worker", id).Err(err).Msg("could not write metadata to disk")
+				return
+			}
+		} else {
+			//TODO: do we want to merge the metadata or no?
+			log.Warn().Int("P Worker", id).Str("File", local).Msg("File already exists")
 		}
 	}
 
@@ -150,98 +146,97 @@ type downloaderJob struct {
 	process        bool
 }
 
-func download_worker(id int, jobs <-chan downloaderJob, work chan processJob, wg *sync.WaitGroup) {
-	defer wg.Done()
-	for job := range jobs {
+func download_worker(id int, job downloaderJob, workQ chan processJob) {
+	log.Info().Int("DLWorker", id).Str("url", job.url).Msg("Processing")
 
-		log.Info().Int("DLWorker", id).Str("url", job.url).Msg("Processing")
+	u, err := url.Parse(job.url)
+	if err != nil {
+		log.Error().Int("DLWorker", id).Err(err).Msg("could not parse url")
+		return
+	}
+	filename := path.Base(u.Path)
 
-		u, err := url.Parse(job.url)
+	local_file := filepath.Join(job.output_folder, filename)
+
+	exists, err := CommonCrawl.FileExists(local_file)
+	if err != nil {
+		log.Error().Int("DLWorker", id).Err(err).Msg("could not check if file exists")
+		return
+	}
+
+	if !exists && job.download {
+		var httpErr *CommonCrawl.HTTPError
+		err = CommonCrawl.DownloadToFile(http.MethodGet, job.url, local_file)
 		if err != nil {
-			log.Error().Int("DLWorker", id).Err(err).Msg("could not parse url")
-			continue
-		}
-		filename := path.Base(u.Path)
-
-		local_file := filepath.Join(job.output_folder, filename)
-
-		exists, err := CommonCrawl.FileExists(local_file)
-		if err != nil {
-			log.Error().Int("DLWorker", id).Err(err).Msg("could not check if file exists")
-			continue
-		}
-
-		if !exists && job.download {
-			err = CommonCrawl.DownloadToFile(job.url, local_file)
-			if err != nil {
+			if errors.As(err, &httpErr) {
+				log.Error().Int("DLWorker", id).Str("status", httpErr.Status).Str("body", httpErr.Body).Msg("could not download WARC")
+			} else {
 				log.Error().Int("DLWorker", id).Err(err).Msg("could not download WARC")
-				continue
 			}
-			exists = true
+			return
 		}
+		exists = true
+	}
 
-		if job.process && exists {
-			err = ProcessLocalWarc(local_file, job.content_folder, work)
-			if err != nil {
-				log.Error().Int("DLWorker", id).Err(err).Msg("could not process WARC")
-				continue
-			}
+	if job.process && exists {
+		err = ProcessLocalWarc(local_file, job.content_folder, workQ)
+		if err != nil {
+			log.Error().Int("DLWorker", id).Err(err).Msg("could not process WARC")
+			return
+
 		}
 	}
 }
 
 func extract() {
 
-	index := viper.GetString("Index")
+	index := viper.GetString("CCIndex")
 	baseUrl := viper.GetString("BaseUrl")
 	output_folder := filepath.Join(viper.GetString("DataFolder"), index)
 	if err := os.MkdirAll(filepath.Dir(output_folder), 0755); err != nil {
 		log.Fatal().Err(err).Msg("Could not create output folder")
 	}
-	data_output := filepath.Join(output_folder, viper.GetString("ContentFolderName"))
-	if err := os.MkdirAll(filepath.Dir(output_folder), 0755); err != nil {
+	warc_cache := filepath.Join(output_folder, viper.GetString("Extract.WarcCacheFolderName"))
+	if err := os.MkdirAll(filepath.Dir(warc_cache), 0755); err != nil {
+		log.Fatal().Err(err).Msg("Could not create warc cache folder")
+	}
+	content_output := filepath.Join(output_folder, viper.GetString("ContentFolderName"))
+	if err := os.MkdirAll(filepath.Dir(content_output), 0755); err != nil {
 		log.Fatal().Err(err).Msg("Could not create content folder")
 	}
 
 	warc_url := fmt.Sprintf(viper.GetString("WarcPathFormat"), baseUrl, index)
 
-	decompressed, err := CommonCrawl.DownloadAndUnGZip(warc_url)
+	decompressed, err := CommonCrawl.DownloadAndUnGZip(http.MethodGet, warc_url)
 	if err != nil {
-		log.Fatal().Err(err).Msg("")
+		var httpErr *CommonCrawl.HTTPError
+		if errors.As(err, &httpErr) {
+			log.Error().Str("status", httpErr.Status).Str("body", httpErr.Body).Msg("could not download/ungzip")
+		} else {
+			log.Fatal().Err(err).Msg("could not download/ungzip")
+		}
 	}
 
 	lines := strings.Split(string(decompressed), "\n")
-	max_downloads := viper.GetInt("MaxDownloads")
-	downloadWarc := viper.GetBool("DownloadWarc")
-	processWarc := viper.GetBool("ProcessWarc")
+	max_downloads := viper.GetInt("Extract.MaxDownloads")
+	downloadWarc := viper.GetBool("Extract.DownloadWarc")
+	processWarc := viper.GetBool("Extract.ProcessWarc")
 
-	if viper.GetBool("RandomizeWarcOrder") {
+	if viper.GetBool("Extract.RandomizeWarcOrder") {
 		rand.Shuffle(len(lines), func(i, j int) {
 			lines[i], lines[j] = lines[j], lines[i]
 		})
 	}
 
-	numJobs := len(lines)
-	if max_downloads > 0 {
-		numJobs = max_downloads
-	}
-	var wgJobs sync.WaitGroup
-	var wgWork sync.WaitGroup
-
-	jobs := make(chan downloaderJob, numJobs)
-	workQ := make(chan processJob)
-
-	// Start Workers
-	numWorkers := viper.GetInt("DownloadWorkers")
-	for w := 1; w <= numWorkers; w++ {
-		wgJobs.Add(1)
-		go download_worker(w, jobs, workQ, &wgJobs)
-	}
-	numWorkers = viper.GetInt("ProcessWorkers")
-	for p := 1; p <= numWorkers; p++ {
-		wgWork.Add(1)
-		go process_worker(p, workQ, &wgWork)
-	}
+	dlPool := CommonCrawl.NewChainedWorker(
+		viper.GetInt("Extract.DownloadWorkers"),
+		download_worker,
+	)
+	procPool := CommonCrawl.NewChainedWorkerFrom(
+		dlPool.Output(),
+		viper.GetInt("Extract.ProcessWorkers"),
+		process_worker,
+	)
 
 	// Enqueue Jobs
 	count := 0
@@ -255,23 +250,16 @@ func extract() {
 		}
 		dl := downloaderJob{
 			url:            fmt.Sprintf("%s/%s", baseUrl, line),
-			output_folder:  output_folder,
-			content_folder: data_output,
+			output_folder:  warc_cache,
+			content_folder: content_output,
 			download:       downloadWarc,
 			process:        processWarc,
 		}
-		jobs <- dl
+		dlPool.Enqueue(dl)
 	}
 
-	// Close jobs channel
-	close(jobs)
-	// Wait for jobs to finish
-	wgJobs.Wait()
-
-	// Close the work channel
-	close(workQ)
-	// Wait for the work to finish
-	wgWork.Wait()
+	dlPool.CloseAndWait()
+	<-procPool.Done()
 }
 
 var extractCmd = &cobra.Command{
@@ -284,23 +272,17 @@ var extractCmd = &cobra.Command{
 
 func init() {
 
-	extractCmd.Flags().String("index", "CC-MAIN-2026-43", "CommonCrawl Index to use")
-	_ = viper.BindPFlag("Index", extractCmd.Flags().Lookup("index"))
-
-	extractCmd.Flags().String("data", ".\\data", "Local folder to store data")
-	_ = viper.BindPFlag("DataFolder", extractCmd.Flags().Lookup("data"))
-
 	extractCmd.Flags().Bool("shuffle", false, "Shuffle WARC download/processing order")
-	_ = viper.BindPFlag("RandomizeWarcOrder", extractCmd.Flags().Lookup("shuffle"))
+	_ = viper.BindPFlag("Extract.RandomizeWarcOrder", extractCmd.Flags().Lookup("shuffle"))
 
 	extractCmd.Flags().Bool("download", true, "Download WARC files")
-	_ = viper.BindPFlag("DownloadWarc", extractCmd.Flags().Lookup("download"))
+	_ = viper.BindPFlag("Extract.DownloadWarc", extractCmd.Flags().Lookup("download"))
 
 	extractCmd.Flags().Bool("process", true, "Process WARC files")
-	_ = viper.BindPFlag("ProcessWarc", extractCmd.Flags().Lookup("process"))
+	_ = viper.BindPFlag("Extract.ProcessWarc", extractCmd.Flags().Lookup("process"))
 
 	extractCmd.Flags().Int("max", -1, "Maximum number of WARC files to download/process")
-	_ = viper.BindPFlag("MaxDownloads", extractCmd.Flags().Lookup("max"))
+	_ = viper.BindPFlag("Extract.MaxDownloads", extractCmd.Flags().Lookup("max"))
 
 	rootCmd.AddCommand(extractCmd)
 }

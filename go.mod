@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/internetarchive/gowarc v0.8.104
+	github.com/joeguo/tldextract v0.0.0-20220507100122-d83daa6adef8
 	github.com/kardianos/service v1.0.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/rs/zerolog v1.18.0
