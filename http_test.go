@@ -25,10 +25,12 @@ func TestNewHttpClient(t *testing.T) {
 func TestNewHttpRequest(t *testing.T) {
 	const method = http.MethodPost
 	const requestURL = "https://example.com/resource"
-	previousUserAgent := viper.GetString("UserAgent")
-	viper.Set("UserAgent", "test-agent")
+	const viperConfigUserAgent = "Http.UserAgent"
+
+	previousUserAgent := viper.GetString(viperConfigUserAgent)
+	viper.Set(viperConfigUserAgent, "test-agent")
 	t.Cleanup(func() {
-		viper.Set("UserAgent", previousUserAgent)
+		viper.Set(viperConfigUserAgent, previousUserAgent)
 	})
 
 	client, req := NewHttpRequest(method, requestURL)
@@ -208,7 +210,7 @@ func TestDownloadPage(t *testing.T) {
 			}))
 			defer server.Close()
 
-			got, err := DownloadPage(server.URL)
+			got, err := DownloadPage(http.MethodGet, server.URL)
 			if tt.wantErr != "" {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
@@ -237,13 +239,13 @@ func TestDownloadToFile(t *testing.T) {
 			name:       "reject non-OK success status",
 			statusCode: http.StatusCreated,
 			body:       "not written",
-			wantErr:    "unexpected status: 201 Created",
+			wantErr:    "http error: 201 Created",
 		},
 		{
 			name:       "reject server error",
 			statusCode: http.StatusInternalServerError,
 			body:       "not written",
-			wantErr:    "unexpected status: 500 Internal Server Error",
+			wantErr:    "http error: 500 Internal Server Error",
 		},
 	}
 
@@ -256,7 +258,7 @@ func TestDownloadToFile(t *testing.T) {
 			defer server.Close()
 
 			filePath := filepath.Join(t.TempDir(), "nested", "page.txt")
-			err := DownloadToFile(server.URL, filePath)
+			err := DownloadToFile(http.MethodGet, server.URL, filePath)
 			if tt.wantErr != "" {
 				assert.Error(t, err)
 				assert.EqualError(t, err, tt.wantErr)
@@ -277,7 +279,7 @@ func TestDownloadToFile(t *testing.T) {
 		parentFile := filepath.Join(t.TempDir(), "parent")
 		assert.NoError(t, os.WriteFile(parentFile, []byte("not a directory"), 0600))
 
-		err := DownloadToFile("http://example.com", filepath.Join(parentFile, "page.txt"))
+		err := DownloadToFile(http.MethodGet, "http://example.com", filepath.Join(parentFile, "page.txt"))
 		assert.Error(t, err)
 	})
 }
@@ -367,7 +369,7 @@ func TestDownloadAndUnGZip(t *testing.T) {
 			}))
 			defer server.Close()
 
-			got, err := DownloadAndUnGZip(server.URL)
+			got, err := DownloadAndUnGZip(http.MethodGet, server.URL)
 			if tt.wantErr != "" {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
