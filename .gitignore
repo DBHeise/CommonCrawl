@@ -31,3 +31,7 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+cmd/CommonCrawl/config.yaml
+cmd/CommonCrawl/failed.jsonl
+cmd/CommonCrawl/tld.cache
