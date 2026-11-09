@@ -27,6 +27,7 @@ func init() {
 	viper.SetDefault("Http.UserAgent", "CommonCrawl CLI/1.0 (https://github.com/dbheise/commoncrawlcli)")
 	viper.SetDefault("Http.ErrorBodyLimit", 8192)
 	viper.SetDefault("Http.DefaultTimeoutSeconds", 30)
+	viper.SetDefault("SavePathFormat", ":header.warc-identified-payload-type:\\:tld.tld:\\:urlhash.3_1:\\:urlhash.3_2:\\url.hash")
 
 	viper.SetDefault("WarcPathFormat", "%s/crawl-data/%s/warc.paths.gz")
 	viper.SetDefault("Extract.WarcCacheFolderName", "warc_cache")

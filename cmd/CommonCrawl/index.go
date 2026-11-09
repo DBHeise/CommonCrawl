@@ -15,12 +15,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joeguo/tldextract"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-var extractor *tldextract.TLDExtract
+var (
+	indexCache *CommonCrawl.Cache
+)
 
 func processIndex(ccindex, local string, q chan map[string]string) {
 	log.Info().Str("file", local).Msg("processing local index file")
@@ -46,7 +47,7 @@ func processIndex(ccindex, local string, q chan map[string]string) {
 
 			u := itemData["url"]
 			itemData[viper.GetString("Index.FieldNames.CCIndex")] = ccindex
-			tldInfo := extractor.Extract(u)
+			tldInfo := CommonCrawl.ExtractTLD(u)
 			itemData[viper.GetString("Index.FieldNames.Tld")] = tldInfo.Tld
 			itemData[viper.GetString("Index.FieldNames.DomainRoot")] = tldInfo.Root
 			itemData[viper.GetString("Index.FieldNames.SubDomain")] = tldInfo.Sub
@@ -72,9 +73,12 @@ func buildLocalIndex(q chan map[string]string) {
 		log.Fatal().Err(err).Msg("Could not create output folder")
 	}
 
+	indexCache := CommonCrawl.NewCache(output_folder)
+
 	index_url := fmt.Sprintf(viper.GetString("IndexPathFormat"), baseUrl, index)
 	log.Info().Str("Url", index_url).Msg("gathering index index")
-	index_content, err := CommonCrawl.DownloadAndUnGZip(http.MethodGet, index_url)
+
+	index_content, err := indexCache.DownloadAndUnGZip(http.MethodGet, index_url)
 	if err != nil {
 		var httpErr *CommonCrawl.HTTPError
 		if errors.As(err, &httpErr) {
@@ -103,7 +107,6 @@ func buildLocalIndex(q chan map[string]string) {
 		downloaded := false
 		if !exists {
 			log.Info().Str("local", index_local).Msg("Downloading")
-			CommonCrawl.DownloadToFile(http.MethodGet, index_url, index_local)
 			err = CommonCrawl.DownloadToFile(http.MethodGet, index_url, index_local)
 			if err != nil {
 				var httpErr *CommonCrawl.HTTPError
@@ -132,11 +135,6 @@ func index() {
 
 	workers := viper.GetInt("Index.BulkInserters")
 	index_name := viper.GetString("Index.InsertionIndex")
-	extr, err := tldextract.New(viper.GetString("TLDCacheFile"), false)
-	if err != nil {
-		log.Fatal().Err(err).Msg("could not create TLDExtract cache")
-	}
-	extractor = extr
 
 	docQ := make(chan map[string]string)
 	client := OpenSearch.Client{

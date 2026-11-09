@@ -25,6 +25,10 @@ import (
 	"github.com/spf13/viper"
 )
 
+var (
+	extractCache *CommonCrawl.Cache
+)
+
 type processJob struct {
 	record        *warc.Record
 	output_folder string
@@ -55,12 +59,12 @@ func process_worker(id int, job processJob, outQ chan string) {
 	if CommonCrawl.ContainsAnySub(mime, viper.GetStringSlice("Extract.MimeFilter")) {
 
 		//Convert url to local path
-		local, err := CommonCrawl.URLToLocalPath_Robust(job.output_folder, targetURL, mime)
+		local, err := CommonCrawl.URLToLocalPath(job.output_folder, targetURL, record.Header)
 		if err != nil {
 			log.Error().Int("P Worker", id).Err(err).Msg("could not extract local path")
 			return
 		}
-		local_metadata := local + viper.GetString("MetadataExtension")
+		local_metadata := local + viper.GetString("MetadataExtention")
 
 		// ensure local path is ready
 		if err := os.MkdirAll(filepath.Dir(local), 0755); err != nil {
@@ -101,7 +105,7 @@ func process_worker(id int, job processJob, outQ chan string) {
 			}
 		} else {
 			//TODO: do we want to merge the metadata or no?
-			log.Warn().Int("P Worker", id).Str("File", local).Msg("File already exists")
+			log.Warn().Int("P Worker", id).Str("File", local).Msg("file already exists")
 		}
 	}
 
@@ -205,9 +209,11 @@ func extract() {
 		log.Fatal().Err(err).Msg("Could not create content folder")
 	}
 
+	extractCache := CommonCrawl.NewCache(warc_cache)
+
 	warc_url := fmt.Sprintf(viper.GetString("WarcPathFormat"), baseUrl, index)
 
-	decompressed, err := CommonCrawl.DownloadAndUnGZip(http.MethodGet, warc_url)
+	decompressed, err := extractCache.DownloadAndUnGZip(http.MethodGet, warc_url)
 	if err != nil {
 		var httpErr *CommonCrawl.HTTPError
 		if errors.As(err, &httpErr) {

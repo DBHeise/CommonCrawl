@@ -43,182 +43,97 @@ func TestNewHttpRequest(t *testing.T) {
 	}
 }
 
-func TestURLToLocalPathRobust(t *testing.T) {
-	tests := []struct {
-		name    string
-		baseDir string
-		rawURL  string
-		mime    string
-		want    string
-		wantErr bool
-	}{
-		{
-			name:    "hash URL and partition by MIME and top-level domain",
-			baseDir: "archive",
-			rawURL:  "https://www.example.com/a/b.html?x=1",
-			mime:    "text/html; charset=utf-8",
-			want: filepath.Join(
-				"archive",
-				"text_html",
-				"com",
-				"353",
-				"225",
-				"0ed",
-				"3532250edb2a93f9d894c6a9dbace024bae2ecd7bacb8399171c662006e9dcac",
-			),
-		},
-		{
-			name:    "use unknown domain for host without a dot",
-			baseDir: "archive",
-			rawURL:  "http://localhost/resource",
-			mime:    "application/json",
-			want: filepath.Join(
-				"archive",
-				"application_json",
-				"unknown",
-				"621",
-				"56b",
-				"29e",
-				"62156b29e9378b20861a3d9e14307269a414ae1cd7bdddfaf5ccd476e88e0c99",
-			),
-		},
-		{
-			name:    "reject malformed URL escape",
-			baseDir: "archive",
-			rawURL:  "https://example.com/%zz",
-			mime:    "text/html",
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := URLToLocalPath_Robust(tt.baseDir, tt.rawURL, tt.mime)
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Empty(t, got)
-				return
-			}
-			assert.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
 func TestURLToLocalPath(t *testing.T) {
+	const savePathFormatKey = "SavePathFormat"
+	const tldCacheFileKey = "TLDCacheFile"
+
+	previousSavePathFormat := viper.GetString(savePathFormatKey)
+	previousTLDCacheFile := viper.GetString(tldCacheFileKey)
+	previousExtractor := extractor
+	t.Cleanup(func() {
+		viper.Set(savePathFormatKey, previousSavePathFormat)
+		viper.Set(tldCacheFileKey, previousTLDCacheFile)
+		extractor = previousExtractor
+	})
+
+	tldCacheFile := filepath.Join(t.TempDir(), "tld.cache")
+	if err := os.WriteFile(tldCacheFile, []byte("com\norg\nnet\n"), 0600); err != nil {
+		t.Fatalf("write TLD cache: %v", err)
+	}
+	viper.Set(tldCacheFileKey, tldCacheFile)
+	extractor = nil
+
 	tests := []struct {
 		name    string
-		baseDir string
+		format  string
 		rawURL  string
+		headers map[string]string
+		baseDir string
 		want    string
-		wantErr bool
+		wantErr string
 	}{
 		{
-			name:    "preserve directories and use URL hash as filename",
-			baseDir: "archive",
-			rawURL:  "https://www.example.com/a/b.html?x=1",
-			want:    filepath.Join("archive", "www.example.com", "a", "3532250edb2a93f9.html"),
+			name:    "expand domain and URL path macros",
+			format:  ":tld.domainroot:/:tld.tld:/:url.hostname::url.path:",
+			rawURL:  "https://www.example.com/articles/a%3Fb.html",
+			baseDir: "downloads",
+			want:    filepath.Join("downloads", "example", "com", "www.example.com", "articles", "a_b.html"),
 		},
 		{
-			name:    "use HTML extension when URL has none",
-			baseDir: "archive",
-			rawURL:  "https://example.com",
-			want:    filepath.Join("archive", "example.com", "100680ad546ce6a5.html"),
+			name:    "expand and sanitize header and URL macros",
+			format:  ":header.x-test:/:url.scheme:/:url.host:",
+			rawURL:  "https://example.com:8443/page",
+			headers: map[string]string{"x-test": "release:v1"},
+			baseDir: "downloads",
+			want:    filepath.Join("downloads", "release_v1", "https", "example.com_8443"),
 		},
 		{
-			name:    "URL query affects generated filename",
-			baseDir: "archive",
-			rawURL:  "https://example.com/path?one=1",
-			want:    filepath.Join("archive", "example.com", "93d282acfb8b2dcd.html"),
+			name:    "sanitize an unexpanded missing header macro",
+			format:  ":header.missing:/:url.hostname:",
+			rawURL:  "https://example.com/page",
+			headers: map[string]string{"x-test": "release:v1"},
+			baseDir: "downloads",
+			want:    filepath.Join("downloads", "_header.missing_", "example.com"),
 		},
 		{
-			name:    "reject malformed URL",
-			baseDir: "archive",
-			rawURL:  "https://[::1",
-			wantErr: true,
+			name:    "sanitize an empty header macro",
+			format:  ":header.empty:/:url.hostname:",
+			rawURL:  "https://example.com/page",
+			headers: map[string]string{"empty": ""},
+			baseDir: "downloads",
+			want:    filepath.Join("downloads", "example.com"),
 		},
 		{
-			name:    "sanitize empty hostname",
-			baseDir: "archive",
-			rawURL:  "mailto:user@example.com",
-			want:    filepath.Join("archive", "_", "57c9bca033401834.html"),
+			name:    "normalize parent components in the URL path",
+			format:  ":url.hostname::url.path:",
+			rawURL:  "https://example.com/section/../private",
+			baseDir: "downloads",
+			want:    filepath.Join("downloads", "example.com", "private"),
+		},
+		{
+			name:    "reject an empty format and base directory",
+			format:  "",
+			rawURL:  "https://example.com/page",
+			baseDir: "",
+			wantErr: "empty path",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := URLToLocalPath(tt.baseDir, tt.rawURL)
-			if tt.wantErr {
-				assert.Error(t, err)
-				assert.Empty(t, got)
-				return
-			}
-			if assert.NoError(t, err) {
-				baseAbs, absErr := filepath.Abs(tt.want)
-				assert.NoError(t, absErr)
-				assert.Equal(t, baseAbs, got)
-			}
-		})
-	}
-}
+			viper.Set(savePathFormatKey, tt.format)
 
-func TestDownloadPage(t *testing.T) {
-	tests := []struct {
-		name       string
-		statusCode int
-		body       string
-		want       []byte
-		wantErr    string
-	}{
-		{
-			name:       "download successful response",
-			statusCode: http.StatusOK,
-			body:       "<html>content</html>",
-			want:       []byte("<html>content</html>"),
-		},
-		{
-			name:       "accept created response",
-			statusCode: http.StatusCreated,
-			body:       "created",
-			want:       []byte("created"),
-		},
-		{
-			name:       "accept empty response body",
-			statusCode: http.StatusOK,
-			body:       "",
-			want:       []byte{},
-		},
-		{
-			name:       "reject client error",
-			statusCode: http.StatusNotFound,
-			body:       "missing",
-			wantErr:    "404 Not Found",
-		},
-		{
-			name:       "reject server error",
-			statusCode: http.StatusInternalServerError,
-			body:       "failed",
-			wantErr:    "500 Internal Server Error",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(tt.statusCode)
-				_, _ = io.WriteString(w, tt.body)
-			}))
-			defer server.Close()
-
-			got, err := DownloadPage(http.MethodGet, server.URL)
+			got, err := URLToLocalPath(tt.baseDir, tt.rawURL, tt.headers)
 			if tt.wantErr != "" {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.wantErr)
-				assert.Nil(t, got)
+				if assert.EqualError(t, err, tt.wantErr) {
+					assert.Empty(t, got)
+				}
 				return
 			}
-			assert.NoError(t, err)
-			assert.Equal(t, tt.want, got)
+
+			if assert.NoError(t, err) {
+				assert.Equal(t, tt.want, got)
+			}
 		})
 	}
 }
@@ -319,57 +234,6 @@ func TestDecompressGZIP(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := DecompressGZIP(tt.data)
-			if tt.wantErr != "" {
-				assert.Error(t, err)
-				assert.Contains(t, err.Error(), tt.wantErr)
-				assert.Nil(t, got)
-				return
-			}
-			assert.NoError(t, err)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
-func TestDownloadAndUnGZip(t *testing.T) {
-	validGZIP := gzipData(t, []byte("downloaded and decompressed"))
-
-	tests := []struct {
-		name       string
-		statusCode int
-		body       []byte
-		want       []byte
-		wantErr    string
-	}{
-		{
-			name:       "download and decompress successful response",
-			statusCode: http.StatusOK,
-			body:       validGZIP,
-			want:       []byte("downloaded and decompressed"),
-		},
-		{
-			name:       "propagate download status error",
-			statusCode: http.StatusNotFound,
-			body:       []byte("missing"),
-			wantErr:    "404 Not Found",
-		},
-		{
-			name:       "report invalid gzip response",
-			statusCode: http.StatusOK,
-			body:       []byte("not gzip"),
-			wantErr:    "open gzip data",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(tt.statusCode)
-				_, _ = w.Write(tt.body)
-			}))
-			defer server.Close()
-
-			got, err := DownloadAndUnGZip(http.MethodGet, server.URL)
 			if tt.wantErr != "" {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
