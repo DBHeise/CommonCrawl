@@ -6,7 +6,7 @@ require (
 	github.com/internetarchive/gowarc v0.8.104
 	github.com/joeguo/tldextract v0.0.0-20220507100122-d83daa6adef8
 	github.com/mitchellh/go-homedir v1.1.0
-	github.com/rs/zerolog v1.18.0
+	github.com/rs/zerolog v1.35.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.6.2
 	github.com/stretchr/testify v1.12.1
@@ -23,6 +23,8 @@ require (
 	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
 	github.com/magiconair/properties v1.8.1 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/maypok86/otter v1.2.4 // indirect
 	github.com/miekg/dns v1.1.73 // indirect
 	github.com/mitchellh/mapstructure v1.1.2 // indirect
