@@ -13,7 +13,6 @@ require (
 )
 
 require (
-	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/dolthub/maphash v0.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.4.7 // indirect
 	github.com/gammazero/deque v1.0.0 // indirect
@@ -30,7 +29,6 @@ require (
 	github.com/mitchellh/mapstructure v1.1.2 // indirect
 	github.com/molecule-man/go-brrr v1.2.0 // indirect
 	github.com/pelletier/go-toml v1.2.0 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/refraction-networking/utls v1.8.3-0.20261006222701-ff1b50fbbe9a // indirect
 	github.com/spf13/afero v1.1.2 // indirect
 	github.com/spf13/cast v1.3.0 // indirect
