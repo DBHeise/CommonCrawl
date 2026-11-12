@@ -91,8 +91,9 @@ func addHashParts(m map[string]string, baseKey string, hash string) {
 
 func ApplyMacros(format string, macroMap map[string]string) string {
 	output := format
+	macroChar := viper.GetString("MacroChar")
 	for key, val := range macroMap {
-		output = strings.ReplaceAll(output, ":"+strings.ToLower(key)+":", val)
+		output = strings.ReplaceAll(output, macroChar+strings.ToLower(key)+macroChar, val)
 	}
 	return output
 }

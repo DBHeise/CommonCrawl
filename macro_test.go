@@ -38,7 +38,7 @@ func TestExtractTLD(t *testing.T) {
 		},
 		// {
 		// 	name: "extract IPv6 address",
-		// 	url:  "http://2001:db8:1::ab9:C0A8:102/",
+		// 	url:  "http://[2001:db8:1::ab9:C0A8:102]/",
 		// 	want: tldextract.Result{Flag: tldextract.Ip6, Tld: "ipv6", Root: "2001:0db8:0000:2f3b:02aa:00ff:f328:9c5a"},
 		// },
 		{
