@@ -1,9 +1,9 @@
 module CommonCrawl
 
-go 1.26.0
+go 1.27
 
 require (
-	github.com/internetarchive/gowarc v0.8.104
+	github.com/internetarchive/gowarc v0.8.105
 	github.com/joeguo/tldextract v0.0.0-20220507100122-d83daa6adef8
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/rs/zerolog v1.35.1
@@ -13,7 +13,6 @@ require (
 )
 
 require (
-	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dolthub/maphash v0.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.4.7 // indirect
@@ -29,9 +28,10 @@ require (
 	github.com/maypok86/otter v1.2.4 // indirect
 	github.com/miekg/dns v1.1.73 // indirect
 	github.com/mitchellh/mapstructure v1.1.2 // indirect
+	github.com/molecule-man/go-brrr v1.2.0 // indirect
 	github.com/pelletier/go-toml v1.2.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/refraction-networking/utls v1.8.2 // indirect
+	github.com/refraction-networking/utls v1.8.3-0.20261006222701-ff1b50fbbe9a // indirect
 	github.com/spf13/afero v1.1.2 // indirect
 	github.com/spf13/cast v1.3.0 // indirect
 	github.com/spf13/jwalterweatherman v1.0.0 // indirect
