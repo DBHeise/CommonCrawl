@@ -5,13 +5,11 @@ go 1.26.0
 require (
 	github.com/internetarchive/gowarc v0.8.104
 	github.com/joeguo/tldextract v0.0.0-20220507100122-d83daa6adef8
-	github.com/kardianos/service v1.0.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/rs/zerolog v1.18.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.6.2
 	github.com/stretchr/testify v1.8.1
-	golang.org/x/net v0.61.0
 )
 
 require (
@@ -41,6 +39,7 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
