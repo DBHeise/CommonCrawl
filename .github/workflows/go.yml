@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: version
+    needs: build
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
