@@ -70,7 +70,7 @@ jobs:
       run: |
         $env:GOOS="${{ matrix.target.GOOS }}"
         $env:GOARCH="${{ matrix.target.GOARCH }}"
-        $env:VER="${{ steps.calculate-version.outputs.version-string }}"
+        $env:VER="${{ needs.version.outputs.newtag }}"
         ./scripts/compile.ps1
     - name: Archive
       uses: actions/upload-artifact@v4
