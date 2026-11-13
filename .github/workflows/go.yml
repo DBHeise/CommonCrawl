@@ -10,7 +10,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Set up Go (from go.mod)
       uses: actions/setup-go@v7
       with:
@@ -29,7 +29,7 @@ jobs:
       newtag: ${{ steps.calculate-version.outputs.version-string }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -58,7 +58,7 @@ jobs:
           - GOOS: windows
             GOARCH: amd64
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: Set up Go (from go.mod)
       uses: actions/setup-go@v7
@@ -73,7 +73,7 @@ jobs:
         $env:VER="${{ needs.version.outputs.newtag }}"
         ./scripts/compile.ps1
     - name: Archive
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         if-no-files-found: error
         name: CommonCrawl-${{ matrix.target.GOOS }}-${{ matrix.target.GOARCH }}
@@ -83,14 +83,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: build
+    needs:
+      - build
+      - version
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-tags: true
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
       - name: Prepare Artifacts for Release
@@ -100,7 +102,7 @@ jobs:
             7z a "${file}.zip" "$file"
           done
       - name: Create a Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ needs.version.outputs.newtag }}
           tag_name: ${{ needs.version.outputs.newtag }}
