@@ -75,8 +75,9 @@ jobs:
     - name: Archive
       uses: actions/upload-artifact@v4
       with:
+        if-no-files-found: error
         name: CommonCrawl-${{ matrix.target.GOOS }}-${{ matrix.target.GOARCH }}
-        path: Bin\CommonCrawl-${{ matrix.target.GOOS }}-${{ matrix.target.GOARCH }}*
+        path: Bin/CommonCrawl-${{ matrix.target.GOOS }}-${{ matrix.target.GOARCH }}*
 
   release:
     runs-on: ubuntu-latest
