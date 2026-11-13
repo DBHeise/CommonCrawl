@@ -39,6 +39,8 @@ Get-ChildItem (Join-Path $projectRoot "cmd") -directory | ForEach-Object {
 -X main.commit="$commit" -X main.version="$buildStr" -X main.builddate="$buildDate"
 "@
   $outFile = Join-Path $binFolder ($_.Name + $arch + $ext)
+  Write-Host "Using LDStr:" $ldStr
+  Write-Host "Building to: " $outFile
   go build -ldflags "$ldStr" -o $outFile #-json
   if ($LASTEXITCODE -ne 0) {
     exit 123453
