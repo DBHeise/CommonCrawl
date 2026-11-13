@@ -95,18 +95,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: artifacts
-      - name: Prepare Artifacts for Release
-        run: |
-          for file in artifacts/*; do
-            [ -f "$file" ] || continue
-            7z a "${file}.zip" "$file"
-          done
       - name: Create a Release
         uses: softprops/action-gh-release@v3
         with:
           name: ${{ needs.version.outputs.newtag }}
           tag_name: ${{ needs.version.outputs.newtag }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          generate_release_notes: true
           make_latest: true
           files:
-            artifacts/*.zip
+            artifacts/*

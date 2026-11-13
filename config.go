@@ -39,7 +39,7 @@ func init() {
 	viper.SetDefault("Extract.MaxDownloads", -1)
 	viper.SetDefault("Extract.DownloadWorkers", 3)
 	viper.SetDefault("Extract.ProcessWorkers", 6)
-	viper.SetDefault("Extract.MimeFilter", []string{})
+	viper.SetDefault("Extract.MimeFilter", []string{""})
 
 	viper.SetDefault("IndexPathFormat", "%s/crawl-data/%s/cc-index.paths.gz")
 	viper.SetDefault("Index.CacheFolderName", "index_cache")
