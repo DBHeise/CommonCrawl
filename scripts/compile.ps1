@@ -5,24 +5,32 @@
 # Folder Variables
 $scriptFolder = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 $projectRoot = Split-Path $scriptFolder
+$binFolder = Join-Path $projectRoot "Bin"
+if (!(Test-Path $binFolder)) { mkdir $binFolder | Out-Null}
 
 ###########################
 # File Lists
 
 ###########################
 # Build Information
-$buildInfoJson = Join-Path $scriptFolder "builddata.json"
-$buildData = (Get-Content $buildInfoJson -raw | ConvertFrom-Json)
-$buildData.Version.Build += 1
-$buildData.TimeStamp = [DateTime]::Now.ToString("yyyy-MM-ddTHH:mm:ss.fffffffzzz")
-$buildData | ConvertTo-Json -Compress | Set-Content $buildInfoJson -Encoding Ascii
-$buildStr = $buildData.Version.Major.ToString() + "." + $buildData.Version.Minor.ToString() + "." +  $buildData.Version.Patch.ToString() + "." +  $buildData.Version.Build.ToString()
+$buildStr = $env:VER
+if ($buildStr -eq "") {
+  $buildStr = "vLocal"
+}
 
+$arch = "-" + $env:GOOS + "-" + $env:GOARCH
+if ($arch -eq "--") {
+  $arch = ""
+}
+$ext = ""
+if ($arch.StartsWith("windows") -or $arch -eq "") {
+  $ext = ".exe"
+}
 
 ###########################
 # Full program compliation
 Write-Progress -Activity "Program Compliation"
-gci (Join-Path $projectRoot "cmd") -directory | % {
+Get-ChildItem (Join-Path $projectRoot "cmd") -directory | ForEach-Object {
   Push-Location -Path $_
   Write-Progress -Activity "Program Compliation" -CurrentOperation $_
   $commit = git rev-parse --short HEAD
@@ -30,7 +38,8 @@ gci (Join-Path $projectRoot "cmd") -directory | % {
   $ldStr = @"
 -X main.commit="$commit" -X main.version="$buildStr" -X main.builddate="$buildDate"
 "@
-  go build -ldflags "$ldStr"
+  $outFile = Join-Path $binFolder ($_.Name + $arch + $ext)
+  go build -ldflags "$ldStr" -o $outFile #-json
   if ($LASTEXITCODE -ne 0) {
     exit 123453
   }
