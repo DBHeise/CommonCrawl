@@ -1,4 +1,4 @@
-name: Go
+name: Test-Build-Release
 
 on:
   push:
@@ -70,13 +70,15 @@ jobs:
     - name: Build for ${{ matrix.target.GOOS }}/${{ matrix.target.GOARCH }}
       shell: pwsh
       run: |
+        $env:GOOS="${{ matrix.target.GOOS }}"
+        $env:GOARCH="${{ matrix.target.GOARCH }}"
         $env:VER="${{ steps.calculate-version.outputs.version-string }}"
         ./scripts/compile.ps1
     - name: Archive
       uses: actions/upload-artifact@v4
       with:
-        name: Binaries
-        path: Bin
+        name: CommonCrawl-${{ matrix.target.GOOS }}-${{ matrix.target.GOARCH }}
+        path: Bin\CommonCrawl-${{ matrix.target.GOOS }}-${{ matrix.target.GOARCH }}*
 
   release:
     runs-on: ubuntu-latest
