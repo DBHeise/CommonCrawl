@@ -17,7 +17,8 @@ jobs:
         go-version-file: 'go.mod'  # Reads Go version from go.mod
         cache: true                # Optional: cache Go modules
     - name: Test
-      run: go test -v ./...
+      shell: pwsh
+      run: .\scripts\test.ps1
 
   version:
     runs-on: ubuntu-latest
@@ -67,9 +68,10 @@ jobs:
         go-version-file: 'go.mod'  # Reads Go version from go.mod
         cache: true                # Optional: cache Go modules
     - name: Build for ${{ matrix.target.GOOS }}/${{ matrix.target.GOARCH }}
+      shell: pwsh
       run: |
-        echo "GOOS=${{ matrix.target.GOOS }} GOARCH=${{ matrix.target.GOARCH }}"
-        VER=${{ steps.calculate-version.outputs.version-string }} ./scripts/compile.ps1
+        $env:VER="${{ steps.calculate-version.outputs.version-string }}"
+        ./scripts/compile.ps1
     - name: Archive
       uses: actions/upload-artifact@v4
       with:
