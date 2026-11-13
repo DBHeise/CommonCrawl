@@ -20,11 +20,20 @@ func SanitizePath(path string, replacement rune) (string, error) {
 		return "", errors.New("empty path")
 	}
 
+	driveRoot := ""
+	if len(path) >= 3 && isDriveLetter(path[0]) && path[1] == ':' && isPathSeparator(path[2]) {
+		driveRoot = path[:3]
+	}
+
 	// Normalize all separators first.
 	path = strings.ReplaceAll(path, "\\", "/")
 
 	isAbs := filepath.IsAbs(path)
 	volume := filepath.VolumeName(path)
+	if driveRoot != "" {
+		volume = path[:2]
+		isAbs = true
+	}
 	path = strings.TrimPrefix(path, volume)
 
 	parts := strings.Split(path, "/")
@@ -57,6 +66,9 @@ func SanitizePath(path string, replacement rune) (string, error) {
 	}
 
 	if len(safeParts) == 0 {
+		if driveRoot != "" {
+			return filepath.Join(driveRoot), nil
+		}
 		if volume != "" && isAbs {
 			return volume + string(filepath.Separator), nil
 		}
@@ -64,6 +76,9 @@ func SanitizePath(path string, replacement rune) (string, error) {
 	}
 
 	safePath := filepath.Join(safeParts...)
+	if driveRoot != "" {
+		return filepath.Join(driveRoot, safePath), nil
+	}
 	if volume != "" {
 		if isAbs {
 			return filepath.Join(volume+string(filepath.Separator), safePath), nil
@@ -74,6 +89,14 @@ func SanitizePath(path string, replacement rune) (string, error) {
 		return filepath.Join(string(filepath.Separator), safePath), nil
 	}
 	return safePath, nil
+}
+
+func isDriveLetter(char byte) bool {
+	return char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z'
+}
+
+func isPathSeparator(char byte) bool {
+	return char == '/' || char == '\\'
 }
 
 func sanitizeComponent(name string, replacement rune) string {
