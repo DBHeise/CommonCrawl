@@ -9,6 +9,8 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
     - uses: actions/checkout@v7
     - name: Set up Go (from go.mod)
@@ -45,6 +47,8 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: version
     strategy:
       matrix:
@@ -95,6 +99,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: artifacts
+          merge-multiple: true
       - name: Create a Release
         uses: softprops/action-gh-release@v3
         with:
