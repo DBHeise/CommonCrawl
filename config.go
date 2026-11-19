@@ -97,7 +97,10 @@ func InitializeConfig(cfgFile string) {
 	if err := viper.ReadInConfig(); err == nil {
 		//fmt.Println("Using config file:", viper.ConfigFileUsed())
 	} else {
-		panic(err)
+		//no config file found
+		currentPath, _ := filepath.Abs(".")
+		cfgFile := filepath.Join(currentPath, "config.yaml")
+		GenerateDefaultConfig(cfgFile)
 	}
 
 }
