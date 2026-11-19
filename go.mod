@@ -3,7 +3,7 @@ module CommonCrawl
 go 1.27
 
 require (
-	github.com/internetarchive/gowarc v0.8.105
+	github.com/internetarchive/gowarc v0.8.106
 	github.com/joeguo/tldextract v0.0.0-20220507100122-d83daa6adef8
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/rs/zerolog v1.35.1
@@ -40,7 +40,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
-	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/sync v0.25.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
